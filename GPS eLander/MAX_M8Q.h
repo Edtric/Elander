@@ -32,21 +32,25 @@
     uint32 GPS_Subframe[10];
     uint32 GLONASS_Subframe[4];
     
+    CY_ISR ( RX_Int_Handle );
+    void GPS_I2C_Output( void );
+    void GPS_UART_Output( void );
     void GPS_I2C_Read( void );
+    void GPS_UART_Read( void );
     void MAX_M8Q_Get_Byte_Size( void );
     
     typedef struct MAX_M8Q_Data
     {
         uint8 gps_stream;
-        char gps_itoa;
+        char ASCII;
     } GPS;
     
     typedef struct NMEA_Data
     {
         float time;
-        float lat;
+        int lat;
         char *dir_lat;
-        float lon;
+        int lon;
         char *dir_lon;
         uint8 quality;
         uint8 num_sat;
