@@ -16,6 +16,9 @@
 char testString[30];
 char testSection1[10];
 char testSection2[10];
+char testSection3[10];
+char testSection4[10];
+char testSection5[10];
 
 int main()
 {
@@ -29,27 +32,36 @@ int main()
     
 //    RX_ISR_StartEx( RX_Int_Handle );
     
+    I2C_MasterClearReadBuf();
+    
     for(;;)
     {
+//        GPS_UART_Gather_Data();
+//        GPS_I2C_Gather_Data();
+        
+        GPS_I2C_Read();
+        if( I2C_MasterGetReadBufSize() > 0 )
+        {
+            UART_DEBUG_PutChar( GPS_Data.ASCII );
+        }
+        I2C_MasterClearReadBuf();
+
+        
 //        sprintf( testString , "GNGGA,,,,,,0,00,99.99,,,,,,*56" );
-        sprintf( testString , "GNGGA,,0" );
-        sscanf( testString , "GNGGA,,%s" , testSection1 , testSection2 );
-        UART_DEBUG_PutString( testSection1 );
-        UART_DEBUG_PutChar('\n');
-        UART_DEBUG_PutString( testSection2 );
-        UART_DEBUG_PutString("\n\r");
-        CyDelay( 100 );
+//        sprintf( testString , "1,2,3,,5" );
+//        sscanf( testString , "%[^','],%[^','],%[^','],%[^','],%[^',']" , testSection1 , testSection2 , testSection3 , testSection4 , testSection5 );
+//        UART_DEBUG_PutString( testSection1 );
+//        UART_DEBUG_PutChar('\n');
+//        UART_DEBUG_PutString( testSection2 );
+//        UART_DEBUG_PutChar('\n');
+//        UART_DEBUG_PutString( testSection3 );
+//        UART_DEBUG_PutChar('\n');
+//        UART_DEBUG_PutString( testSection4 );
+//        UART_DEBUG_PutChar('\n');
+//        UART_DEBUG_PutString( testSection5 );
+//        UART_DEBUG_PutString("\n\r");
+//        CyDelay( 100 );
         
-        
-//        GPS_I2C_Read();
-        
-//        UART_DEBUG_PutChar( GPS_Data.gps_itoa );
-        
-//        GPS_I2C_Output();
-        
-//        GPS_UART_Read();
-        
-//        if( (GPS_Data.ASCII < 128) && (GPS_Data.ASCII > 0) ) UART_DEBUG_PutChar( GPS_Data.ASCII );
         
 //        sprintf( output , "Fix quality: %d     Number of satellites: %d\n\r" , FixData.quality , FixData.num_sat );
 //        sprintf( output , "Position: %f %s , %f %s \n\r" , FixData.lat , FixData.dir_lat , FixData.lon , FixData.dir_lon );

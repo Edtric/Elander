@@ -11,23 +11,45 @@
 */
 
 #include "MAX_M8Q.h"
-#include <stdio.h>
 
 char NMEASentence[85];    // Buffer for storing NMEA sentence
-uint8 element = 1;            // Element of NMEA sentence
-uint8 endSentence;        // End of NMEA sentence condition
 char read;
-char output[50];
+char output[50];          // UART output buffer, used only for debugging
+char *token;              // Holds the string token from strtok function
+char Check_Sum[3];        // Holds unparsed checksum
 
+const char *delim = ",";  // String delimiter
+
+uint8 element = 0;        // Element of NMEA sentence
+uint8 endSentence;        // Flag for end of NMEA sentence
 uint8 i;
 uint8 j;
-uint8 beginSave = 0;
-int CHECKSUM;             // Final checksum value (not ASCII)
-int chksum_xor;           // 
+uint8 timeStringPos;      // Position/element of unconverted time token.
+uint8 stringPos;          // Position/element of string token.
+uint8 substringPos;       // Position/element of substring token.
 
-char *delim;              // String delimiter
-char *token;              // Holds the string token from strtok function
-char Check_Sum[2];        // Holds unparsed checksum
+bool placeHolder;
+bool beginSave = false;   // Flag determining when to start saving full NMEA string
+
+int checksumVal;          // Calculated numeric checksum value (not ASCII)
+int checksumXOR;          // Variable holding XOR'd values of each byte in string
+
+
+
+
+/*===========================================================================================
+       Name: Time_Convert
+     Inputs: void
+    Outputs: void
+Description: Converts the acquired time values into hours, minutes, and seconds.
+===========================================================================================*/
+void Time_Convert( void )
+{
+    FixData.time_hr = atoi( StringTime.hours );
+    FixData.time_min = atoi( StringTime.minutes );
+    FixData.time_sec = atof( StringTime.seconds );
+}
+/*=========================================================================================*/
 
 
 
@@ -35,11 +57,103 @@ char Check_Sum[2];        // Holds unparsed checksum
        Name: Time_Parse
      Inputs: void
     Outputs: void
-Description: Parses the acquired time values into hours, minutes, and seconds.
+Description: Parses the acquired time values into their respective substrings of hours, 
+             minutes, and seconds.
 ===========================================================================================*/
 void Time_Parse( void )
 {
+    timeStringPos = 0;
     
+    while( timeStringPos < 9 )
+    {
+        switch( timeStringPos )
+        {
+            case 0:
+            StringTime.hours[0] = FixString.time[timeStringPos];
+            break;
+            case 1:
+            StringTime.hours[1] = FixString.time[timeStringPos];
+            break;
+            case 2:
+            StringTime.minutes[0] = FixString.time[timeStringPos];
+            break;
+            case 3:
+            StringTime.minutes[1] = FixString.time[timeStringPos];
+            break;
+            case 4:
+            StringTime.seconds[0] = FixString.time[timeStringPos];
+            break;
+            case 5:
+            StringTime.seconds[1] = FixString.time[timeStringPos];
+            break;
+            case 6:
+            StringTime.seconds[2] = FixString.time[timeStringPos];
+            break;
+            case 7:
+            StringTime.seconds[3] = FixString.time[timeStringPos];
+            break;
+            default:
+            StringTime.seconds[4] = FixString.time[timeStringPos];
+        }
+        timeStringPos++;
+    }
+}
+/*=========================================================================================*/
+
+
+
+/*===========================================================================================
+       Name: NMEA_Token
+     Inputs: char *Fix_String: Substring that will store token of NMEA string.
+    Outputs: void
+Description: Breaks up the unparsed NMEA string into individual tokens to be placed in their 
+             respective substring.
+===========================================================================================*/
+void NMEA_Token( char *Fix_String )
+{
+    substringPos = 0;
+    while( *(NMEASentence + stringPos) != ',' && *(NMEASentence + stringPos) != '\r' && *(NMEASentence + stringPos) != '\n' )
+    {
+        *(Fix_String + substringPos) = *(NMEASentence + stringPos);
+        substringPos++;
+        stringPos++;
+    }
+    stringPos++;
+}
+/*=========================================================================================*/
+
+
+
+/*===========================================================================================
+       Name: Checksum_Token
+     Inputs: char *subString: Parsed string containing checksum hex value.
+    Outputs: void
+Description: Removes checksum in string form from Reference ID substring, and places it in its
+             own substring.
+===========================================================================================*/
+void Checksum_Token( void )
+{
+    j = 0;
+    substringPos = 0;
+    
+    // Increment through Reference ID substring until checksum section
+    while( *(FixString.ref_ID + substringPos) != '*' )
+    {
+        substringPos++;
+    }
+    
+    // Clear the '*'
+    *(FixString.ref_ID + substringPos) = '\0';
+    substringPos++;
+    
+    // Clear the checksum section of original substring
+    while( *(FixString.ref_ID + substringPos) != '\0' )
+    {
+        Check_Sum[j] = *(FixString.ref_ID + substringPos);
+        *(FixString.ref_ID + substringPos) = '\0';
+        substringPos++;
+        j++;
+    }
 }
 /*=========================================================================================*/
 
@@ -53,60 +167,104 @@ Description: Parses the acquired NMEA GPGGA string and converts them into values
              the controller.
 ===========================================================================================*/
 void GPGGA_Parse( void )
-{
-    i = 0;
+{    
+    stringPos = 6;
     
-    *delim = ',';
-    token = strtok( NMEASentence , delim );
-    i++;
+    // Makes sure that the substrings are all empty.
+    memset( FixString.time , '\0' , strlen(FixString.time) );
+    memset( FixString.lat , '\0' , strlen(FixString.lat) );
+    memset( FixString.dir_lat , '\0' , strlen(FixString.dir_lat) );
+    memset( FixString.lon , '\0' , strlen(FixString.lon) );
+    memset( FixString.dir_lon , '\0' , strlen(FixString.dir_lon) );
+    memset( FixString.quality , '\0' , strlen(FixString.quality) );
+    memset( FixString.num_sat , '\0' , strlen(FixString.num_sat) );
+    memset( FixString.HDOP , '\0' , strlen(FixString.HDOP) );
+    memset( FixString.altitude , '\0' , strlen(FixString.altitude) );
+    memset( FixString.M1 , '\0' , strlen(FixString.M1) );
+    memset( FixString.geoidal_sep , '\0' , strlen(FixString.geoidal_sep) );
+    memset( FixString.M2 , '\0' , strlen(FixString.M2) );
+    memset( FixString.data_age , '\0' , strlen(FixString.data_age) );
+    memset( FixString.ref_ID , '\0' , strlen(FixString.ref_ID) );
     
-    while( token != NULL )
-    {
-        token = strtok( NULL , delim );
-        
-        switch( i )
-        {
-        case 1:                                            
-            FixData.time = atof( token );         // Time
-            Time_Parse();
-            break;
-        case 2:
-            FixData.lat = atoi( token );          // Latitude
-            break;
-        case 3:
-            FixData.dir_lat = token;              // N or S
-            break;
-        case 4:
-            FixData.lon = atoi( token );          // Longitude
-            break;
-        case 5:
-            FixData.dir_lon = token;              // E or W
-            break;
-        case 6:
-            FixData.quality = atoi( token );      // Fix quality
-            break;
-        case 7:
-            FixData.num_sat = atoi( token );      // Number of satellites in view
-            break;
-        case 8:
-            FixData.HDOP = atof( token );         // Horizontal Dilution of Precision
-            break;
-        case 9:
-            FixData.altitude = atof( token );     // Altitude in meters above mean-sea-level
-            break;
-        case 11:
-            FixData.geoidal_sep = atof( token );  // Geoidal separation in meters
-            break;
-        case 13:
-            FixData.data_age = atof( token );     // Time since last differential GPS data update
-            break;
-        case 14:
-            FixData.ref_ID = atoi( token );       // Reference station ID
-            break;
-        }
-        
-        i++;
-    }
+    // Breaks the NMEA string into smaller substrings(tokens).
+    NMEA_Token( FixString.time );
+    NMEA_Token( FixString.lat );
+    NMEA_Token( FixString.dir_lat );
+    NMEA_Token( FixString.lon );
+    NMEA_Token( FixString.dir_lon );
+    NMEA_Token( FixString.quality );
+    NMEA_Token( FixString.num_sat );
+    NMEA_Token( FixString.HDOP );
+    NMEA_Token( FixString.altitude );
+    NMEA_Token( FixString.M1 );
+    NMEA_Token( FixString.geoidal_sep );
+    NMEA_Token( FixString.M2 );
+    NMEA_Token( FixString.data_age );
+    NMEA_Token( FixString.ref_ID );
+    
+    // Split checksum from ref_ID token
+    Checksum_Token();
+
+    // UART outputs for debugging
+    UART_DEBUG_PutString( "time: " );
+    UART_DEBUG_PutString( FixString.time );
+    UART_DEBUG_PutChar('\r');
+    
+    UART_DEBUG_PutString( "lat: " );
+    UART_DEBUG_PutString( FixString.lat );
+    UART_DEBUG_PutString(" ");
+    UART_DEBUG_PutString( FixString.dir_lat );
+    UART_DEBUG_PutChar('\r');
+    
+    UART_DEBUG_PutString( "lon: " );
+    UART_DEBUG_PutString( FixString.lon );
+    UART_DEBUG_PutString(" ");
+    UART_DEBUG_PutString( FixString.dir_lon );
+    UART_DEBUG_PutChar('\r');
+    
+//    UART_DEBUG_PutString( "quality: " );
+//    UART_DEBUG_PutString( FixString.quality );
+//    UART_DEBUG_PutChar('\r');
+//    
+//    UART_DEBUG_PutString( "num_sat: " );
+//    UART_DEBUG_PutString( FixString.num_sat );
+//    UART_DEBUG_PutChar('\r');
+    
+//    UART_DEBUG_PutString( "HDOP: " );
+//    UART_DEBUG_PutString( FixString.HDOP );
+//    UART_DEBUG_PutChar('\r');
+    
+//    UART_DEBUG_PutString( "altitude: " );
+//    UART_DEBUG_PutString( FixString.altitude );
+//    UART_DEBUG_PutChar('\r');
+    
+//    UART_DEBUG_PutString( "geoidal_sep: " );
+//    UART_DEBUG_PutString( FixString.geoidal_sep );
+//    UART_DEBUG_PutChar('\r');
+    
+//    UART_DEBUG_PutString( "data_age: " );
+//    UART_DEBUG_PutString( FixString.data_age );
+//    UART_DEBUG_PutChar('\r');
+    
+    UART_DEBUG_PutString( "ref_ID: " );
+    UART_DEBUG_PutString( FixString.ref_ID );
+    UART_DEBUG_PutString("\r");
+    
+    UART_DEBUG_PutString( "Checksum: " );
+    UART_DEBUG_PutString( Check_Sum );
+    UART_DEBUG_PutString("\r\n");
+    
+    // Converts tokens from strings to numerical values.
+    Time_Parse();
+    FixData.lat = atof( FixString.lat );
+    FixData.lon = atof( FixString.lon );
+    FixData.quality = atoi( FixString.quality );
+    FixData.num_sat = atoi( FixString.num_sat );
+    FixData.HDOP = atof( FixString.HDOP );
+    FixData.altitude = atof( FixString.altitude );
+    FixData.geoidal_sep = atof( FixString.geoidal_sep );
+    FixData.data_age = atof( FixString.data_age );
+    FixData.ref_ID = atoi( FixString.ref_ID );
 }
 /*=========================================================================================*/
 
@@ -138,13 +296,11 @@ void NMEA_ID_Check( void )
     // If it's GGA.
     if( NMEASentence[2] == 'G' && NMEASentence[3] == 'G' && NMEASentence[4] == 'A' )
     {
-        // Use GGA parsing function
         GPGGA_Parse();
     }
     // If it's RMC.
     else if( NMEASentence[2] == 'R' && NMEASentence[3] == 'M' && NMEASentence[4] == 'C' )
     {
-        // Use RMC parsing function
         GPRMC_Parse();
     }
 }
@@ -157,13 +313,12 @@ void NMEA_ID_Check( void )
      Inputs: void
     Outputs: void
 Description: Addresses the GPS device followed by the register address as the packet. Then,
-             streams data from device and stores in a buffer.
+             reads data from device and stores in a buffer.
 ===========================================================================================*/
 void GPS_I2C_Read( void )
 {
     GPS_Data.gps_stream = I2C_ReadByte( MAX_M8Q_ADDRESS , DATA_STREAM_REG );
     GPS_Data.ASCII = GPS_Data.gps_stream;
-//    UART_DEBUG_PutChar( GPS_Data.ASCII );
 }
 /*=========================================================================================*/
 
@@ -202,30 +357,38 @@ void GPS_UART_Read( void )
        Name: NMEA_Checksum
      Inputs: void
     Outputs: void
-Description: Performs a checksum on the NMEA sentence, to ensure .
+Description: Performs a checksum on the NMEA sentence to ensure data integrity. All elements
+             after '$' is XOR'd and compared to checksum value from the original NMEA string.
 ===========================================================================================*/
-uint8 NMEA_Checksum( void )
+bool NMEA_Checksum( void )
 {
     j = 0;
     
+    // Convert checksum ASCII hex value into decimal value
     while( j < 2 )
     {
-        if( (Check_Sum[j] > 47) && Check_Sum[j] < 58 ) Check_Sum[j] = Check_Sum[j] - 48;
-        if( Check_Sum[j] > 64 ) Check_Sum[j] = Check_Sum[j] - 55;
-        
-        CHECKSUM = ( (Check_Sum[0] << 4) + Check_Sum[1] );
+        if( (Check_Sum[j] > 47) && Check_Sum[j] < 58 ) Check_Sum[j] = Check_Sum[j] - 48; // if 0 - 9
+        else if( Check_Sum[j] > 64 ) Check_Sum[j] = Check_Sum[j] - 55; // if A - F
+        j++;
     }
+    
+    checksumVal = ( (Check_Sum[0] << 4) + Check_Sum[1] ); // Bit-shift and add to generate full value
     
     j = 0;
-    chksum_xor = 0;
+    checksumXOR = 0;
     
-    while( NMEASentence[j] < strlen( NMEASentence ) )
+    // XOR all values after $ and before checksum delimiter, '*'
+    while( NMEASentence[j] != '*' )
     {
-        chksum_xor ^= NMEASentence[j];
+        checksumXOR ^= NMEASentence[j];
+        j++;
     }
     
-    if( chksum_xor == CHECKSUM ) return 1;
-    else return 0;
+    if( checksumXOR == checksumVal )
+    {
+        return true;
+    }
+    else return false;
 }
 /*=========================================================================================*/
 
@@ -237,45 +400,45 @@ uint8 NMEA_Checksum( void )
     Outputs: void
 Description: .
 ===========================================================================================*/
-void GPS_I2C_Output( void )
-{
-    endSentence = 0; 
-    while( endSentence != 1 ) // While not the end of NMEA sentence
-    {
-        j = 0;
-        element = 0;
-        GPS_I2C_Read();
-        
-        // Look for the start of a NMEA sentence
-        if( GPS_Data.ASCII == '$' && (GPS_Data.ASCII < 128) && (GPS_Data.ASCII > 0) )
-        {
-            // Save the string to an array
-            while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') && (GPS_Data.ASCII != '*') )
-            {
-                GPS_I2C_Read();
-                NMEASentence[element] = GPS_Data.ASCII;
-                element++;
-            }
-            
-            if( GPS_Data.ASCII == '*' )
-            {
-                while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') )
-                {
-                    GPS_I2C_Read();
-                    Check_Sum[j] = GPS_Data.ASCII;
-                    j++;
-                }
-            }
-            // Performs checksum to ensure data is valid
-//            NMEA_Checksum();
-            
-            // Check the next 5 elements for the NMEA sentence identifier, i.e. 'GPGGA'
-            NMEA_ID_Check();
-            
-            endSentence = 1; // End of NMEA sentence
-        }
-    }
-}
+//void GPS_I2C_Output( void )
+//{
+//    endSentence = 0; 
+//    while( endSentence != 1 ) // While not the end of NMEA sentence
+//    {
+//        j = 0;
+//        element = 0;
+//        GPS_I2C_Read();
+//        
+//        // Look for the start of a NMEA sentence
+//        if( GPS_Data.ASCII == '$' && (GPS_Data.ASCII < 128) && (GPS_Data.ASCII > 0) )
+//        {
+//            // Save the string to an array
+//            while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') && (GPS_Data.ASCII != '*') )
+//            {
+//                GPS_I2C_Read();
+//                NMEASentence[element] = GPS_Data.ASCII;
+//                element++;
+//            }
+//            
+//            if( GPS_Data.ASCII == '*' )
+//            {
+//                while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') )
+//                {
+//                    GPS_I2C_Read();
+//                    Check_Sum[j] = GPS_Data.ASCII;
+//                    j++;
+//                }
+//            }
+//            // Performs checksum to ensure data is valid
+////            NMEA_Checksum();
+//            
+//            // Check the next 5 elements for the NMEA sentence identifier, i.e. 'GPGGA'
+//            NMEA_ID_Check();
+//            
+//            endSentence = 1; // End of NMEA sentence
+//        }
+//    }
+//}
 /*=========================================================================================*/
 
 
@@ -286,43 +449,109 @@ void GPS_I2C_Output( void )
     Outputs: void
 Description: .
 ===========================================================================================*/
-void GPS_UART_Output( void )
+//void GPS_UART_Output( void )
+//{
+//    endSentence = 0; 
+//    while( endSentence != 1 ) // While not the end of NMEA sentence
+//    {
+//        j = 0;
+//        element = 0;
+//        GPS_UART_Read();
+//        
+//        // Look for the start of a NMEA sentence
+//        if( GPS_Data.ASCII == '$' && (GPS_Data.ASCII < 128) && (GPS_Data.ASCII > 0) )
+//        {
+//            // Save the string to an array
+//            while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') && (GPS_Data.ASCII != '*') )
+//            {
+//                GPS_UART_Read();
+//                NMEASentence[element] = GPS_Data.ASCII;
+//                element++;
+//            }
+//            
+//            if( GPS_Data.ASCII == '*' )
+//            {
+//                while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') )
+//                {
+//                    GPS_UART_Read();
+//                    Check_Sum[j] = GPS_Data.ASCII;
+//                    j++;
+//                }
+//            }
+//            // Performs checksum to ensure data is valid
+////            NMEA_Checksum();
+//            
+//            // Check the next 5 elements for the NMEA sentence identifier, i.e. 'GPGGA'
+//            NMEA_ID_Check();
+//            
+//            endSentence = 1; // End of NMEA sentence
+//        }
+//    }
+//}
+/*=========================================================================================*/
+
+
+
+/*===========================================================================================
+       Name: GPS_I2C_Gather_Data
+     Inputs: void
+    Outputs: void
+Description: Main GPS data gathering function, utilizing I2C.
+===========================================================================================*/
+/** May be able to combine with GPS_UART_Gather_Data() **/
+void GPS_I2C_Gather_Data( void )
 {
-    endSentence = 0; 
-    while( endSentence != 1 ) // While not the end of NMEA sentence
+    if( I2C_MasterGetReadBufSize() )
     {
-        j = 0;
-        element = 0;
-        GPS_UART_Read();
-        
-        // Look for the start of a NMEA sentence
-        if( GPS_Data.ASCII == '$' && (GPS_Data.ASCII < 128) && (GPS_Data.ASCII > 0) )
+        GPS_I2C_Read();
+        if( GPS_Data.ASCII == '$' ) beginSave = true; // The '$' is ignored, i.e. not saved
+        else if( (beginSave == true) && (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') ) NMEASentence[element++] = GPS_Data.ASCII;
+        else if( (GPS_Data.ASCII == '\n') || (GPS_Data.ASCII == '\r') )
         {
-            // Save the string to an array
-            while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') && (GPS_Data.ASCII != '*') )
-            {
-                GPS_UART_Read();
-                NMEASentence[element] = GPS_Data.ASCII;
-                element++;
-            }
+            beginSave = false;
+            element = 0;
+
+            NMEA_ID_Check(); // Determine which NMEA ID is being used, and parse accordingly
             
-            if( GPS_Data.ASCII == '*' )
-            {
-                while( (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') )
-                {
-                    GPS_UART_Read();
-                    Check_Sum[j] = GPS_Data.ASCII;
-                    j++;
-                }
-            }
-            // Performs checksum to ensure data is valid
-//            NMEA_Checksum();
-            
-            // Check the next 5 elements for the NMEA sentence identifier, i.e. 'GPGGA'
-            NMEA_ID_Check();
-            
-            endSentence = 1; // End of NMEA sentence
+            placeHolder = NMEA_Checksum(); // Perform checksum
+    //        if( placeHolder ) UART_DEBUG_PutString( "Checksum True" );
+    //        else if( !placeHolder ) UART_DEBUG_PutString( "Checksum False" );
+            memset( NMEASentence , '\0' , strlen( NMEASentence ) ); // Clear the string
         }
+        I2C_MasterClearReadBuf();
+    }
+}
+/*=========================================================================================*/
+
+
+
+/*===========================================================================================
+       Name: GPS_UART_Gather_Data
+     Inputs: void
+    Outputs: void
+Description: Main GPS data gathering function, utilizing UART.
+===========================================================================================*/
+/** May be able to combine with GPS_I2C_Gather_Data() **/
+void GPS_UART_Gather_Data( void )
+{
+    if( UART_DEBUG_GetRxBufferSize() )
+    {
+        GPS_UART_Read();
+        if( GPS_Data.ASCII == '$' ) beginSave = true; // The '$' is ignored, i.e. not saved
+        else if( (beginSave == true) && (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') ) NMEASentence[element++] = GPS_Data.ASCII;
+        else if( (GPS_Data.ASCII == '\n') || (GPS_Data.ASCII == '\r') )
+        {
+            beginSave = false;
+            element = 0;
+
+            NMEA_ID_Check(); // Determine which NMEA sentence ID is being used, and parse accordingly
+            
+            placeHolder = NMEA_Checksum(); // Perform checksum
+    //        if( placeHolder ) UART_DEBUG_PutString( "Checksum True" );
+    //        else if( !placeHolder ) UART_DEBUG_PutString( "Checksum False" );
+            memset( NMEASentence , '\0' , strlen( NMEASentence ) ); // Clear the string
+        }
+        UART_DEBUG_ClearRxBuffer();
     }
 }
 /*=========================================================================================*/
@@ -333,25 +562,25 @@ void GPS_UART_Output( void )
        Name: 
      Inputs: void
     Outputs: void
-Description: .
+Description: Interrupt-based version of GPS_UART_Gather_Data. 
 ===========================================================================================*/
 CY_ISR ( RX_Int_Handle )
 {
-//    UART_DEBUG_PutChar( UART_DEBUG_GetChar() );
-    
-    GPS_Data.ASCII = UART_DEBUG_GetChar();
+    GPS_UART_Read();
     if( GPS_Data.ASCII == '$' ) beginSave = 1;
     else if( (beginSave == 1) && (GPS_Data.ASCII != '\n') && (GPS_Data.ASCII != '\r') ) NMEASentence[element++] = GPS_Data.ASCII;
     else if( (GPS_Data.ASCII == '\n') || (GPS_Data.ASCII == '\r') )
     {
         beginSave = 0;
-        element = 1;
+        element = 0;
+
         NMEA_ID_Check();
         
-        sprintf( output , " Position: %d%s , %d%s\n" , FixData.lat , FixData.dir_lat , FixData.lon , FixData.dir_lon );
-        UART_DEBUG_PutString( output );
+//        placeHolder = NMEA_Checksum();
+//        if( placeHolder ) UART_DEBUG_PutString( "Checksum True" );
+//        else if( !placeHolder ) UART_DEBUG_PutString( "Checksum False" );
+        memset( NMEASentence , '\0' , strlen( NMEASentence ) );
     }
-    
     RX_ISR_ClearPending();
 }
 /*=========================================================================================*/
